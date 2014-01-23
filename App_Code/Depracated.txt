@@ -1,0 +1,135 @@
+﻿        If False Then
+            '        Dim PostURL As String = "http://blockchain.info/address/1EXoDusjGwvnjZUyKkxZ4UHEf77z6A5S4P?format=json"
+            For i = 0 To obj.Item("txs").Count - 1
+                Hash = obj.Item("txs").Item(i).Item("hash").ToString
+                Dim UTC As Long = obj.Item("txs").Item(i).Item("time").ToString
+                Dim dTrans As DateTime = DateAdd(DateInterval.Second, UTC, New DateTime(1970, 1, 1, 0, 0, 0))
+
+                Dim blocknumber As Integer = obj.Item("txs").Item(i).Item("block_height").ToString
+                Hash = (New AWS.DB.ConnectDB).HTMLEncode(Hash)
+                If Not IsTxIDinExodus(Hash) Then
+                    Dim Sql As String = "insert into z_Exodus (TxID,dTrans,blocknumber,IsValid,IsProcessed) values ('" + Hash + "','" + dTrans.ToString + "'," + blocknumber.ToString + ",0,0) "
+                    Call (New AWS.DB.ConnectDB).SQLExecute(Sql)
+                    Call showdata(i.ToString + " " + Hash + dTrans.ToString)
+                End If
+            Next
+
+        End If
+            If False Then
+
+
+                UpdateCoinBalances()
+                Dim PostURL As String = "http://blockchain.info/address/" + Address.Text + "?format=json"
+                Dim obj As New JObject
+                Dim json As String = (New Bitcoin).getjson(PostURL)
+                Dim deserializedProduct As Object = JsonConvert.DeserializeObject(Of Object)(json)
+                obj = JsonConvert.DeserializeObject(json)
+                Dim i As Integer = 0
+                Dim Hash As String = "x"
+                Dim obj2 As New JObject
+
+
+                Dim dt As New DataTable()
+                Dim dr As DataRow = Nothing
+                dt.Columns.Add(New DataColumn("TransNo", GetType(String)))
+                dt.Columns.Add(New DataColumn("InAmount", GetType(Double)))
+                dt.Columns.Add(New DataColumn("FromTo", GetType(String)))
+                dt.Columns.Add(New DataColumn("OutAmount", GetType(Double)))
+                dt.Columns.Add(New DataColumn("Date", GetType(String)))
+
+                For i = 0 To obj.Item("txs").Count - 1
+                    Hash = obj.Item("txs").Item(i).Item("hash").ToString
+                    'Using Master Coin Explorer
+                    PostURL = "http://mastercoin-explorer.com/api/v1/transactions/" + Hash + ".json"
+                    Dim json2 As String = (New Bitcoin).getjson(PostURL)
+                    If (json2 <> "null") Then
+                        Dim deserializedProduct2 As Object = JsonConvert.DeserializeObject(Of Object)(json2)
+                        obj2 = JsonConvert.DeserializeObject(json2)
+
+                        Dim Currency As String = "MSC"
+                        If obj2.Item("currency_id") = "2" Then
+                            Currency = "Test MSC"
+                        End If
+                        Dim cStatus As String = "Valid"
+                        If obj2.Item("invalid_tx") = "True" Then
+                            cStatus = "Invalid"
+                        End If
+                        If Currency = ddlCurrency.Text And cStatus = "Valid" Then
+                            '                GVTrans.Rows.Add(Hash, obj2.Item("receiving_address"), obj2.Item("address"), Currency, obj2.Item("amount"), cStatus, obj2.Item("tx_date"))
+                            dr = dt.NewRow()
+                            dr("TransNo") = Hash
+                            dr("InAmount") = "0.00"
+                            dr("OutAmount") = "0.00"
+                            If obj2.Item("receiving_address") = Address.Text Then
+                                dr("FromTo") = obj2.Item("address")
+                                dr("InAmount") = obj2.Item("amount")
+                            Else
+                                dr("FromTo") = obj2.Item("receiving_address")
+                                dr("OutAmount") = obj2.Item("amount")
+                            End If
+                            dr("Date") = obj2.Item("tx_date")
+                            dt.Rows.Add(dr)
+                        End If
+                    End If
+                Next
+                ViewState("CurrentTable") = dt
+                GVTrans.DataSource = dt
+                GVTrans.DataBind()
+
+            End If
+
+
+
+            Dim PostURL As String = "http://mastercoin-explorer.com/api/v1/transactions/" + hash + ".json"
+            'get msc balance from mastercoin-explorer api 
+            Dim obj3 As New JObject
+            Dim json2 As String = (New Bitcoin).getjson(PostURL)
+            Dim deserializedProduct As Object = JsonConvert.DeserializeObject(Of Object)(json2)
+            obj3 = JsonConvert.DeserializeObject(json2)
+            If Not obj3 Is Nothing Then
+                Dim Amount2 As Double = obj3.Item("amount")
+                Dim source As String = obj3.Item("receiving_address").ToString
+
+                source = (New AWS.DB.ConnectDB).HTMLEncode(source)
+                Dim AddressID As Integer = GetAddressID(source)
+                If AddressID = 0 Then
+                    SQL = "insert into z_Address (Address,MSC,TestMSC) values ('" + (New AWS.DB.ConnectDB).HTMLEncode(source) + "',0,0) "
+                    Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+                    AddressID = GetAddressID(source)
+                End If
+                SQL = "update z_Address set MSC=MSC+" + Amount2.ToString + ",TestMSC=TestMSC+" + Amount2.ToString + " where Address='" & source & "'"
+                Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+                'Master Coins
+                SQL = "insert into z_Transactions (dTrans,AddressID,ExodusID,Description,AmountIn,AmountOut,CurrencyID) values (" + _
+                    "'" + dTrans.ToString + "'," + AddressID.ToString + "," + ExodusID.ToString + ",'Generated Coins'," + Amount2.ToString + ",0, 1 ) "
+                Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+                'Test Master Coins
+                SQL = "insert into z_Transactions (dTrans,AddressID,ExodusID,Description,AmountIn,AmountOut,CurrencyID) values (" + _
+                    "'" + dTrans.ToString + "'," + AddressID.ToString + "," + ExodusID.ToString + ",'Generated Coins'," + Amount2.ToString + ",0, 2 ) "
+                Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+                Call showdata(hash)
+            End If
+    Sub Test()
+        Dim PostURL As String = "http://mastercoin-explorer.com/api/v1/transactions.json?page="
+        Dim k As Integer
+
+        For k = 51 To 60
+            Dim json As String = (New Bitcoin).getjson(PostURL & k.ToString)
+            Dim obj As New JArray
+            obj = JsonConvert.DeserializeObject(json)
+            lblData.Text = ""
+            Dim Hash As String
+            For i = 0 To obj.Count - 1
+                Hash = Trim(obj.Item(i).Item("tx_id").ToString)
+                Dim dTrans As DateTime = obj.Item(i).Item("tx_date")
+
+                Dim blocknumber As Integer = obj.Item(i).Item("block_height")
+                Hash = (New AWS.DB.ConnectDB).HTMLEncode(Hash)
+                If Not (New mymastercoins).IsTxIDinExodus(Hash) Then
+                    Dim Sql As String = "insert into z_Exodus (TxID,dTrans,blocknumber,IsValid,IsProcessed) values ('" + Hash + "','" + dTrans.ToString + "'," + blocknumber.ToString + ",0,0) "
+                    Call (New AWS.DB.ConnectDB).SQLExecute(Sql)
+                    Call showdata(i.ToString + " " + Hash + dTrans.ToString)
+                End If
+            Next
+        Next
+    End Sub

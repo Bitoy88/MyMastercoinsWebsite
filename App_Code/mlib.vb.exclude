@@ -1,0 +1,249 @@
+﻿Imports Newtonsoft.Json
+Imports Newtonsoft.Json.Linq
+Imports System.Net
+Imports System.Text
+Imports System.IO
+Imports System.Security.Cryptography
+
+Public Class mlib
+    Public Class bitcoinrpcconnection
+        Public bitcoinrpcserver As String
+        Public bitcoinrpcport As Integer
+        Public bitcoinrpcuser As String
+        Public bitcoinrpcpassword As String
+    End Class
+    Public Class result_validate
+        Public isvalid As Boolean
+        Public address As String
+        Public ismine As Boolean
+        Public isscript As Boolean
+        Public pubkey As String
+        Public iscompressed As Boolean
+        Public account As String
+    End Class
+    Public Class validate
+        Public result As result_validate
+        Public err As Object
+        Public id As String
+    End Class
+    Public Class result_unspent
+        Public txid As String
+        Public vout As Integer
+        Public address As String
+        Public account As String
+        Public scriptpubkey As String
+        Public amount As Double
+        Public confirmations As Integer
+    End Class
+    Public Class unspent
+        Public result As List(Of result_unspent)
+        Public err As Object
+        Public id As String
+    End Class
+    Public Function encodetx(ByVal bitcoin_con As bitcoinrpcconnection, ByVal fromadd As String, ByVal toadd As String, ByVal encodedpubkey As String) As String
+        Dim txhex, fromtxid As String
+        Dim fromtxvout As Integer = -1
+        Dim fromtxamount As Double = -1
+        Dim changeamount As Long
+        Dim txfee As Long = 6000
+        Dim totaltxfee As Long = 50000 'include 0.0002 miner fee
+        Dim frompubkey As String
+        Dim isvalidecdsa As Boolean
+
+        isvalidecdsa = False
+        Do While isvalidecdsa = False
+            Dim rbyte As String = getrandombyte()
+            encodedpubkey = encodedpubkey.Substring(0, 64) & rbyte
+            'isvalidecdsa = validateecdsa(encodedpubkey)
+            isvalidecdsa = True
+        Loop
+
+        'get public key for from address
+        Try
+            Dim validate As validate = JsonConvert.DeserializeObject(Of validate)(rpccall(bitcoin_con, "validateaddress", 1, fromadd, 0, 0))
+            frompubkey = validate.result.pubkey
+            If validate.result.iscompressed = False Then
+                'compress public key
+                frompubkey = frompubkey.Substring(2, 128)
+                If Val(Right(frompubkey, 1)) Mod 2 Then
+                    frompubkey = "03" & Left(frompubkey, 64)
+                Else
+                    frompubkey = "02" & Left(frompubkey, 64)
+                End If
+            End If
+        Catch e As Exception
+            MsgBox("Exeption thrown : " & e.Message)
+        End Try
+        If frompubkey = "" Then
+            MsgBox("Error locating public key for from address.")
+            Exit Function
+        End If
+
+        'lookup unspent for from address
+        Dim listunspent As unspent = JsonConvert.DeserializeObject(Of unspent)(rpccall(bitcoin_con, "listunspent", 2, 1, 999999, 0))
+        Dim inputs() As result_unspent = listunspent.result.ToArray
+        For i = 0 To UBound(inputs)
+            If (inputs(i).amount * 100000000) > totaltxfee And inputs(i).address = fromadd Then
+                fromtxid = inputs(i).txid
+                fromtxvout = inputs(i).vout
+                fromtxamount = inputs(i).amount
+            End If
+        Next
+        If fromtxid = "" Or fromtxvout < 0 Or fromtxamount < 0 Then
+            MsgBox("Insufficient funds for fee at from address.")
+            Exit Function
+        End If
+
+        'handle change
+        changeamount = (fromtxamount * 100000000) - totaltxfee
+
+        'build tx hex raw
+        txhex = "01000000" 'version
+        txhex = txhex & "01" 'vin count
+        txhex = txhex & txidtohex(fromtxid) 'input txid hex
+        txhex = txhex & i32tohex(fromtxvout) 'input vout 00000000
+        txhex = txhex & "00" 'scriptsig length
+        txhex = txhex & "ffffffff" 'sequence
+
+        txhex = txhex & "04" 'number of vouts, future: cater for 3 outs (no change) - since we check txin for >totaltxfee there will always be change for now
+
+        'change output
+        txhex = txhex & i64tohex(changeamount) 'changeamount value
+        txhex = txhex & "19" 'length - 25 bytes
+        txhex = txhex & "76a914" & addresstopubkey(fromadd) & "88ac" 'change scriptpubkey
+        'exodus output
+        txhex = txhex & i64tohex(txfee)
+        txhex = txhex & "19"
+        txhex = txhex & "76a914946cb2e08075bcbaf157e47bcb67eb2b2339d24288ac" 'exodus scriptpubkey
+        'reference/destination output
+        txhex = txhex & i64tohex(txfee)
+        txhex = txhex & "19"
+        txhex = txhex & "76a914" & addresstopubkey(toadd) & "88ac" 'data scriptpubkey 
+
+        'multisig output
+        txhex = txhex & i64tohex(txfee * 2)
+        txhex = txhex & "47" 'length - ??bytes?? calculate
+        txhex = txhex & "51" '???
+        txhex = txhex & "21" '???
+        txhex = txhex & frompubkey 'first multisig address
+        txhex = txhex & "21" '???
+        txhex = txhex & encodedpubkey 'second multisig address
+        txhex = txhex & "52ae" '???
+        txhex = txhex & "00000000" 'locktime
+
+        Return txhex
+    End Function
+    Public Function txidtohex(ByVal txid As String) As String
+        Dim hex() As Byte = StringToByteArray(txid)
+        Array.Reverse(hex)
+        If ((hex IsNot Nothing) And (hex.Length = 32)) Then
+            Dim txidhex As String = bytearraytostring(hex, 0, 32)
+            Return txidhex
+        End If
+    End Function
+    Public Function StringToByteArray(ByVal hex As [String]) As Byte()
+        Dim NumberChars As Integer = hex.Length
+        Dim bytes As Byte() = New Byte(NumberChars \ 2 - 1) {}
+        For i As Integer = 0 To NumberChars - 1 Step 2
+            bytes(i \ 2) = Convert.ToByte(hex.Substring(i, 2), 16)
+        Next
+        Return bytes
+    End Function
+
+    Public Function getrandombyte() As String
+        Dim s As String = "1234567890ABCDEF"
+        Dim r As New Random
+        Dim sb As New StringBuilder
+        For i As Integer = 1 To 2
+            Dim idx As Integer = r.Next(0, 16)
+            sb.Append(s.Substring(idx, 1))
+        Next
+        Return sb.ToString
+    End Function
+    Public Function addresstopubkey(ByVal address As String) As String
+        Dim hex() As Byte = ToByteArray(address)
+        If Not ((hex Is Nothing) OrElse Not (hex.Length <> 21)) Then
+            Dim pubkey As String = bytearraytostring(hex, 1, 20)
+            Return pubkey
+        End If
+    End Function
+    Public Function i64tohex(ByVal amount As Long) As String
+        Dim amountbytes() As Byte = BitConverter.GetBytes(amount)
+        Dim amounthex As String = bytearraytostring(amountbytes, 0, 8)
+        Return amounthex
+    End Function
+    Public Function i32tohex(ByVal amount As Integer) As String
+        Dim amountbytes() As Byte = BitConverter.GetBytes(amount)
+        Dim amounthex As String = bytearraytostring(amountbytes, 0, 4)
+        Return amounthex
+    End Function
+    Public Function bytearraytostring(ByVal ba() As Byte, ByVal offset As Integer, ByVal count As Integer) As String
+        Dim rv As String = ""
+        Dim usedcount As Integer = 0
+        Dim i As Integer = offset
+        Do While (usedcount < count)
+            rv = (rv + (String.Format("{0:X2}", ba(i))))
+            i = i + 1
+            usedcount = usedcount + 1
+        Loop
+        rv = LCase(rv)
+        Return rv
+    End Function
+    Public Function ToByteArray(ByVal base58 As String) As Byte()
+        Return (New Bitcoin).Decode(base58)
+    End Function
+
+
+    Public Function rpccall(ByVal bitcoin_con As bitcoinrpcconnection, ByVal method As String, ByVal param0 As String, ByVal param1 As String, ByVal param2 As String, ByVal param3 As String) As String
+        Dim Ans As String = ""
+        Try
+            Dim webRequest1 As HttpWebRequest = WebRequest.Create("http://" & bitcoin_con.bitcoinrpcserver.ToString & ":" & bitcoin_con.bitcoinrpcport.ToString)
+            webRequest1.Credentials = New NetworkCredential(bitcoin_con.bitcoinrpcuser.ToString, bitcoin_con.bitcoinrpcpassword.ToString)
+            webRequest1.ContentType = "application/json-rpc"
+            webRequest1.Method = "POST"
+            Dim joe As New JObject()
+            joe.Add(New JProperty("jsonrpc", "1.0"))
+            joe.Add(New JProperty("id", "1"))
+            joe.Add(New JProperty("method", method))
+            Dim props As New JArray()
+            'add appropriate number of params (param0 is parameter count)
+            If param0 = 0 Then
+                joe.Add(New JProperty("params", New JArray()))
+            End If
+            If param0 = 1 Then
+                props.Add(param1)
+                joe.Add(New JProperty("params", props))
+            End If
+            If param0 = 2 Then
+                props.Add(param1)
+                props.Add(param2)
+                joe.Add(New JProperty("params", props))
+            End If
+            If param0 = 3 Then
+                props.Add(param1)
+                props.Add(param2)
+                props.Add(param3)
+                joe.Add(New JProperty("params", props))
+            End If
+            '// serialize json for the request
+
+            Dim s As String = JsonConvert.SerializeObject(joe)
+            Dim bytearray As Byte() = Encoding.UTF8.GetBytes(s)
+            webRequest1.ContentLength = bytearray.Length
+            Dim datastream As Stream = webRequest1.GetRequestStream()
+            datastream.Write(bytearray, 0, bytearray.Length)
+            datastream.Close()
+
+            Dim webResponse1 As WebResponse = webRequest1.GetResponse()
+            Dim returnstream As Stream = webResponse1.GetResponseStream()
+            Dim rreader As StreamReader = New StreamReader(returnstream, Encoding.UTF8)
+            Dim responsestring As String = rreader.ReadToEnd()
+            Ans = responsestring
+        Catch e As Exception
+            'exception thrown 
+            MsgBox("Exception thrown: " & e.Message.ToString)
+        End Try
+        Return Ans
+    End Function
+
+End Class

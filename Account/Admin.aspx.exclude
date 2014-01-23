@@ -1,0 +1,56 @@
+﻿<%@ Page Title="About Us" Language="VB" MasterPageFile="~/Site.Master" AutoEventWireup="false"
+    CodeFile="Admin.aspx.vb" Inherits="Admin" %>
+
+<asp:Content ID="HeaderContent" runat="server" ContentPlaceHolderID="HeadContent">
+</asp:Content>
+<asp:Content ID="BodyContent" runat="server" ContentPlaceHolderID="MainContent">
+    <h2>
+        Administration</h2>
+    <p>
+        <asp:Button ID="Button1" runat="server" Text="Get New Exodus Trans from BlockExplorer" 
+            Width="260px" />
+        <asp:Button ID="Button4" runat="server" Text="Get New Exodus Trans" 
+            Width="260px" Visible="False" />
+        <asp:Button ID="Button5" runat="server" Text="Check Sender" 
+            Width="260px" Visible="False" />
+    </p>
+    <p>
+        <asp:Button ID="Button3" runat="server" Text="Process Exodus Transactions" 
+            Width="260px" />
+        <asp:Button ID="Button6" runat="server" Text="Transfer TxID to WWW Server" 
+            Width="260px" Visible="false" />
+    </p>
+    <p>
+        <asp:Button ID="btnRecompBalances" runat="server" Text="Recompute Balances" 
+            Width="260px" />
+    </p>
+    <p>
+        <asp:Button ID="btnRecompBalances0" runat="server" Text="Check vs ME Balance" 
+            Width="260px" />
+        <br />
+        <br />
+    <asp:TextBox ID="MSCBTCPrice" Width="50px"  runat="server">0.01</asp:TextBox> 
+        <asp:Button ID="Button7" runat="server" Text="Update MSC BTCPrice" 
+            Width="212px" />
+        <br />
+        <br />
+        This will erase all database tables except z_Exodus<br />
+        <br />
+        <asp:Button ID="Button2" runat="server" Text="Generate Coins" 
+            Width="257px" />
+    </p>
+    <p>
+        <asp:Button ID="btnRecompBalances1" runat="server" Text="Check MyMastercoins BC" 
+            Width="260px" />
+    </p>
+    <p>
+        <asp:Button ID="btnRecompBalances2" runat="server" Text="Check BE data" 
+            Width="260px" />
+    </p>
+    <p>
+        &nbsp;</p>
+    <p>
+        <br />
+        <asp:Label ID="lblData" runat="server"></asp:Label>
+    </p>
+</asp:Content>

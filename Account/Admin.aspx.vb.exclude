@@ -1,0 +1,459 @@
+﻿
+Imports System.Data
+Imports System.Numerics
+Imports Newtonsoft.Json
+Imports Newtonsoft.Json.Linq
+
+Partial Class Admin
+    Inherits System.Web.UI.Page
+    Protected Sub Page_Load(ByVal sender As Object, ByVal e As System.EventArgs) Handles Me.Load
+        If Not Page.IsPostBack Then
+            Dim SQL As String = "select * from z_Data"
+            Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+            MSCBTCPrice.Text = DS.Tables(0).Rows(0).Item("MSCBTCPrice").ToString
+        End If
+    End Sub
+
+    Protected Sub Button1_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles Button1.Click
+        showdata((New mymastercoins).GetExodusTrans())
+        showdata("Get Transactions completed " + Now.ToString)
+    End Sub
+
+    Sub showdata(ByVal s As String)
+        lblData.Text = s + "<br/>" + lblData.Text
+    End Sub
+
+    Protected Sub Button2_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles Button2.Click
+
+        Call (New AWS.DB.ConnectDB).SQLExecute("delete from  z_Address ")
+        Call (New AWS.DB.ConnectDB).SQLExecute("delete from  z_Transactions ")
+        Call (New AWS.DB.ConnectDB).SQLExecute("delete from  z_CurrencyforSale ")
+        Call (New AWS.DB.ConnectDB).SQLExecute("delete from  z_PurchasingCurrency ")
+        Call (New AWS.DB.ConnectDB).SQLExecute("update z_Exodus set Isprocessed=0 ")
+        'Processing all generated coins before september 1,2013
+        Dim SQL As String = "SELECT * from z_Exodus where  dTrans<='9/1/2013 12:04:34 AM' order by dTrans,blocknumber "
+        Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+
+        For Each Row1 In DS.Tables(0).Rows
+            Dim ExodusID As Integer = Row1.Item("ExodusID")
+            Dim hash As String = Trim(Row1.Item("TxID"))
+            Dim dTrans As DateTime = Row1.Item("dTrans")
+
+            Dim uTime As Long
+            uTime = (dTrans - New DateTime(1970, 1, 1, 0, 0, 0)).TotalSeconds
+
+            Dim exoamount As Double = Row1.Item("Amount")
+            Dim dif As Long = 1377993600 - uTime
+            Dim bonus As Double = 0.1 * (dif / 604800)
+            If bonus < 0 Then bonus = 0 'avoid negative bonus
+            Dim Amount2 As Double = exoamount * 100 * (1 + bonus)
+            Amount2 = Math.Round(Amount2, 8)
+
+            Dim source As String = Trim(Row1.Item("senderaddress"))
+            source = (New AWS.DB.ConnectDB).HTMLEncode(source)
+            showdata(source + Amount2.ToString)
+
+            Dim AddressID As Integer = (New mymastercoins).AddAddress(source)
+            SQL = "update z_Address set MSC=MSC+" + Amount2.ToString + ",TMSC=TMSC+" + Amount2.ToString + " where AddressID=" & AddressID
+            Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+            'Master Coins
+            SQL = "insert into z_Transactions (dTrans,AddressID,ExodusID,Description,AmountIn,AmountOut,CurrencyID) values (" + _
+                "'" + dTrans.ToString + "'," + AddressID.ToString + "," + ExodusID.ToString + ",'Generated Coins'," + Amount2.ToString + ",0, 1 ) "
+            Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+            'Test Master Coins
+            SQL = "insert into z_Transactions (dTrans,AddressID,ExodusID,Description,AmountIn,AmountOut,CurrencyID) values (" + _
+                "'" + dTrans.ToString + "'," + AddressID.ToString + "," + ExodusID.ToString + ",'Generated Coins'," + Amount2.ToString + ",0, 2 ) "
+            Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+
+            '            SQL = "update z_Exodus set IsProcessed=1 where ExodusID= " + ExodusID.ToString
+            '           Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+        Next
+        SQL = "select sum(MSC) as Total from z_Address "
+        Dim DS2 As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+
+        Call showdata("Total coin generated " + DS2.Tables(0).Rows(0).Item("Total").ToString)
+    End Sub
+    Protected Sub Button3_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles Button3.Click
+        Call (New mymastercoins).ProcessTransactions()
+        showdata("Processing completed " + Now.ToString)
+        '        Dim Sql As String = "SELECT sum(MSC) as Total from z_Address"
+        '       Dim DSBal As DataSet = (New AWS.DB.ConnectDB).SQLdataset(Sql)
+        '        Dim Gencoins2 As Double = (1 - (0.5 ^ (DateDiff(DateInterval.Second, #9/1/2013#, #10/31/2013 10:45:45 PM#) / 31557600))) * 0.1 * 563162.23576222
+        '      showdata("Total MSC Balance" + DSBal.Tables(0).Rows(0).Item("Total").ToString)
+    End Sub
+
+    Protected Sub btnRecompBalances_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnRecompBalances.Click
+        Dim MSCTotal As Double = 0
+        Dim ExodusAddressID As Integer = (New mymastercoins).GetAddressID("1EXoDusjGwvnjZUyKkxZ4UHEf77z6A5S4P")
+        Dim SQL As String = "SELECT AddressID,CurrencyID,sum(AmountIn-AmountOut) as Balance from z_Transactions Group by AddressID,CurrencyID"
+        Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+        lblData.Text = ""
+        For Each Row1 In DS.Tables(0).Rows
+            Dim AddressID As Integer = Row1.Item("AddressID")
+            Dim CurrencyID As Integer = Row1.Item("CurrencyID")
+            Dim CurrencyCode As String = (New Bitcoin).GetCurrency(CurrencyID)
+            Dim Balance As Double = Row1.Item("Balance")
+            Dim AddressBalance As Double = (New mymastercoins).GetAddressBalance(AddressID, CurrencyID)
+            Dim Address As String = (New mymastercoins).GetAddress(AddressID)
+            If Balance <> AddressBalance Then
+                showdata("Balance not equal to Transactions " + Address + " CurrencyID=" + CurrencyID.ToString)
+            End If
+            '            SQL = "update z_Address set " & CurrencyCode & "=" & Balance.ToString & " where AddressID=" & AddressID
+            '           Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+            If CurrencyID = 1 Then
+                If AddressID <> ExodusAddressID Then
+                    MSCTotal += Balance
+                End If
+            End If
+        Next
+        showdata("Address balance recomputed. MSC Total " + MSCTotal.ToString())
+    End Sub
+    Protected Sub Button4_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles Button4.Click
+        showdata((New mymastercoins).GetExodusTrans())
+        showdata("Get Transactions completed " + Now.ToString)
+    End Sub
+    Sub Test()
+        Dim PostURL As String = "http://mastercoin-explorer.com/api/v1/transactions.json?page="
+        Dim k As Integer
+
+        For k = 51 To 60
+            Dim json As String = (New Bitcoin).getjson(PostURL & k.ToString)
+            Dim obj As New JArray
+            obj = JsonConvert.DeserializeObject(json)
+            lblData.Text = ""
+            Dim Hash As String
+            For i = 0 To obj.Count - 1
+                Hash = Trim(obj.Item(i).Item("tx_id").ToString)
+                Dim dTrans As DateTime = obj.Item(i).Item("tx_date")
+
+                Dim blocknumber As Integer = obj.Item(i).Item("block_height")
+                Hash = (New AWS.DB.ConnectDB).HTMLEncode(Hash)
+                If Not (New mymastercoins).IsTxIDinExodus(Hash) Then
+                    Dim Sql As String = "insert into z_Exodus (TxID,dTrans,blocknumber,IsValid,IsProcessed) values ('" + Hash + "','" + dTrans.ToString + "'," + blocknumber.ToString + ",0,0) "
+                    Call (New AWS.DB.ConnectDB).SQLExecute(Sql)
+                    Call showdata(i.ToString + " " + Hash + dTrans.ToString)
+                End If
+            Next
+        Next
+    End Sub
+    Protected Sub Button5_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles Button5.Click
+        Dim SQL As String = "SELECT * from z_Exodus where  dTrans<='9/1/2013 12:04:34 AM' order by dTrans,blocknumber "
+        Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+
+        For Each Row1 In DS.Tables(0).Rows
+            Dim ExodusID As Integer = Row1.Item("ExodusID")
+            Dim TxID As String = Trim(Row1.Item("TxID"))
+            Dim senderaddress As String = Trim(Row1.Item("senderaddress"))
+            Dim PostURL = "http://masterchain.info/tx/" + TxID + ".json"
+            Dim json As String = (New Bitcoin).getjson(PostURL)
+            Dim obj As New JArray
+            obj = JsonConvert.DeserializeObject(json)
+            Dim SenderAddress2 As String = obj.Item(0).Item("to_address")
+            If SenderAddress2 <> senderaddress Then
+                showdata(SenderAddress2 + " <> " + senderaddress)
+                SQL = "update z_Exodus set SenderAddress='" & Trim(SenderAddress2) & "' where TxID='" & TxID & "'"
+                Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+            End If
+            '            SQL = "update z_Exodus set IsProcessed=1 where ExodusID= " + ExodusID.ToString
+            '           Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+        Next
+
+    End Sub
+
+    Protected Sub Button6_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles Button6.Click
+        Dim SQL As String = "SELECT * from z_Exodus order by dTrans,blocknumber "
+        Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+        '        Call (New AWS.DB.ConnectDB).SQLExecute2("delete from z_Exodus")
+        For Each Row1 In DS.Tables(0).Rows
+            '            Dim DSCheck As DataSet = (New AWS.DB.ConnectDB).SQLdataset2("Select * from z_Exodus where TxID='" & Row1("TxID").ToString & "'")
+            '           If DS.Tables(0).DefaultView.Count = 0 Then
+            'SQL = "insert into z_Exodus (TxID,dTrans,blocknumber,IsValid,IsProcessed,amount,senderaddress,berawtx,bcrawtx,MSCSenderAddress,MSCReceiverAddress) values ('" + _
+            'Row1("TxID").ToString(+"','" + Row1("dTrans").ToString + "'," + Row1("blocknumber").ToString + ",0,0," + IIf(IsDBNull(Row1("amount")), "0", Row1("amount").ToString) + ",'" + Row1("senderaddress") + "','" + (New AWS.DB.ConnectDB).HTMLEncode(Row1("berawtx")) + "','" + (New AWS.DB.ConnectDB).HTMLEncode(Row1("bcrawtx")) + "','" + Row1("MSCSenderAddress") + "','" + Row1("MSCReceiverAddress") + "') ")
+            'showdata(SQL)
+            'Call (New AWS.DB.ConnectDB).SQLExecute2(SQL)
+            'end If
+        Next
+
+    End Sub
+
+    Protected Sub btnRecompBalances0_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnRecompBalances0.Click
+        Dim PostURL As String = "http://mastercoin-explorer.com/mastercoin_verify/addresses"
+        Dim obj As New JArray
+        Dim json As String = (New Bitcoin).getjson(PostURL)
+        obj = JsonConvert.DeserializeObject(json)
+        Dim i As Integer
+        For i = 0 To obj.Count - 1
+            Dim Address As String = Trim(obj.Item(i).Item("address").ToString)
+            Dim Balance As Double = CDbl(obj.Item(i).Item("balance"))
+            Dim AddressID As Integer = (New mymastercoins).GetAddressID(Address)
+            If AddressID > 0 Then
+                Dim BalanceMM As Double = (New mymastercoins).GetAddressBalance(AddressID, 1)
+                If BalanceMM <> Balance Then
+                    showdata("MM=" + BalanceMM.ToString + " " + Address + " ME=" + Balance.ToString)
+                Else
+                    '                    showdata(Address + " ok!")
+                End If
+
+            End If
+        Next
+        showdata("Comparison Completed")
+    End Sub
+
+    Protected Sub Button7_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles Button7.Click
+        Dim SQL As String = ""
+        If IsNumeric(MSCBTCPrice.Text) Then
+            SQL = "update z_Data set MSCBTCPrice = " & MSCBTCPrice.Text
+            Call (New AWS.DB.ConnectDB).SQLExecute(SQL)
+            Application("MSCPrice") = MSCBTCPrice.Text
+            showdata("MSC Price Updated.")
+        End If
+    End Sub
+
+    Protected Sub btnRecompBalances1_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnRecompBalances1.Click
+        Dim SQL As String = "SELECT * from z_Exodus where BCrawTX='' order by dTrans,blocknumber "
+        Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset2(SQL)
+        For Each Row1 In DS.Tables(0).Rows
+            'Call (New AWS.DB.ConnectDB).SQLExecute2(SQL)
+            Dim PostURL As String = "http://blockchain.info/rawtx/" + Row1("TxID")
+            Dim json As String = (New Bitcoin).getjson(PostURL)
+            Dim bcrawtx As String = (New AWS.DB.ConnectDB).HTMLEncode(json)
+            SQL = "update z_Exodus set bcrawtx='" + bcrawtx + "' where ExodusID=" & Row1("ExodusID")
+            Call (New AWS.DB.ConnectDB).SQLExecute2(SQL)
+            showdata(SQL)
+        Next
+        showdata("Update MM done " + Now.ToString)
+    End Sub
+
+    Protected Sub btnRecompBalances2_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnRecompBalances2.Click
+        'Compare Reference with BlockChain
+
+        '        Dim T1 As Long = DateDiff(DateInterval.Second, #1/1/1970#, #9/1/2013#)
+        '       Dim T2 As Long = DateDiff(DateInterval.Second, #1/1/1970#, #12/1/2013#)
+        '      Dim Gencoins As Double = (1 - (0.5 ^ ((T2 - T1) / 31557600))) * 56316.23576222
+        '        CopyBeInOut()
+
+        Getreferencefrombin()
+        Dim SQL As String = "SELECT  * from z_Exodus order by dTrans,blocknumber "
+
+        Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+        For Each Row1 In DS.Tables(0).Rows
+            Dim ExodusID As Integer = Row1.Item("ExodusID")
+            Dim ReferenceAddress As String = ""
+            Dim txhash As String = Trim(Row1.Item("TxID"))
+            Dim json As String
+
+            'Use BlockChain to get Class A
+            json = Trim(Row1("bcrawtx"))
+            If json <> "" Then
+                Dim obj As JObject
+                obj = JsonConvert.DeserializeObject(json)
+                'Also the Senders Address
+                ReferenceAddress = obj.Item("inputs").First.Item("prev_out").Item("addr")
+                Dim OutArray As JArray = obj.Item("out")
+                Dim ClassAReceipient As String = ""
+                Dim ClassAData As String = ""
+                Dim ThirdAddress As String = ""
+                Dim Value As Double = 99999
+                For Each subitem In OutArray
+                    If Val(subitem("value")) <= Value And _
+                        Trim(subitem("addr").ToString) <> "1EXoDusjGwvnjZUyKkxZ4UHEf77z6A5S4P" And _
+                        Trim(subitem("addr").ToString) <> ReferenceAddress Then
+
+                        ThirdAddress = ClassAData
+                        ClassAData = ClassAReceipient
+                        ClassAReceipient = subitem("addr").ToString()
+                        Value = Val(subitem("value"))
+                    End If
+                Next
+
+                Dim ClassAReceipient2 As String = ""
+                Dim ClassAData2 As String = ""
+                Dim ThirdAddress2 As String = ""
+
+                GetbeReceipient(Row1("beOut"), ReferenceAddress, ClassAReceipient2, ClassAData2, ThirdAddress2)
+
+                Dim beReferenceAddress As String = ""
+                If Not IsDBNull(Row1.Item("beReferenceAddress")) Then
+                    beReferenceAddress = Trim(Row1.Item("beReferenceAddress"))
+                End If
+
+                If ReferenceAddress <> beReferenceAddress Then
+                    showdata(ReferenceAddress + " [" + txhash + "] " + beReferenceAddress)
+                End If
+
+                If Not ((ClassAReceipient = ClassAReceipient2 _
+                        And ClassAData = ClassAData2) Or _
+                        (ClassAReceipient = ClassAData2 _
+                         And ClassAData = ClassAReceipient2)) Then
+                    showdata("2. " + ClassAReceipient2 + " , " + ClassAData2 + "," + ThirdAddress2)
+                    showdata("1. " + ClassAReceipient + " , " + ClassAData + "," + ThirdAddress2)
+                    showdata("Receipient Data Mismatch " + txhash)
+                End If
+
+
+                If ThirdAddress <> ThirdAddress2 Then
+                    '                    showdata(ThirdAddress + " Third Address " + txhash + " " + ThirdAddress2)
+                End If
+
+
+                If Trim(ReferenceAddress) <> beReferenceAddress Then
+                End If
+
+
+
+            End If
+        Next
+        showdata("Reference Check completed " + Now.ToString)
+
+
+    End Sub
+
+    Sub GetbeReceipient(ByVal beOut As String, ByVal ReferenceAddress As String, ByRef ClassAReceipient As String, ByRef ClassAData As String, ByRef ThirdAddress As String)
+        Dim OutArray As JArray
+        OutArray = JsonConvert.DeserializeObject(beOut)
+        Dim Value As Double = 99999999
+        For Each subitem In OutArray
+            Dim Address As String = ""
+            If IsNothing(subitem("address")) Then
+                Dim Hash160 As String = GetStringBetween(subitem("scriptPubKey"), "OP_HASH160", "OP_EQUAL")
+                If Hash160.Length > 0 Then
+                    Address = (New Bitcoin).Hash160toAddress(Trim(Hash160))
+                End If
+            Else
+                Address = Trim(subitem("address"))
+            End If
+
+            If Address <> "" And Address <> "1EXoDusjGwvnjZUyKkxZ4UHEf77z6A5S4P" And _
+            Address <> ReferenceAddress Then
+
+                If Val(subitem("value")) <= Value Then
+                    ThirdAddress = ClassAData
+                    ClassAData = ClassAReceipient
+                    ClassAReceipient = Address
+                    Value = Val(subitem("value"))
+                End If
+
+            End If
+        Next
+
+    End Sub
+    Sub CopyBeInOut()
+        Dim SQL As String = "SELECT  * from z_Exodus"
+        Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+        For Each Row1 In DS.Tables(0).Rows
+            Dim TxID As String = Row1.Item("TxID")
+            Dim beIn As String = Row1.Item("beIn")
+            Dim beOut As String = Row1.Item("beOut")
+            Dim beReferenceAddress As String = Row1.Item("beReferenceAddress")
+            SQL = "Update z_Exodus set beIn='" + beIn + "',beOut='" + beOut + "',beReferenceAddress='" + beReferenceAddress + "' where TxID='" & TxID & "'"
+            Call (New AWS.DB.ConnectDB).SQLExecute2(SQL)
+        Next
+
+    End Sub
+    Sub Getreferencefrombin()
+        '        Dim s1 = (New Bitcoin).DecodeBTCAddresstoHexString("155DH9FHD1PEjMweTJjuSZceKN92TPTnj9")
+        '       Dim temp As String = "2cac6a9954415885b285de8833fc3056eb0e1a23"
+        '      Dim s = (New Bitcoin).Hash160toAddress(temp)
+        Dim SQL As String = "SELECT  * from z_Exodus where (beReferenceAddress Is Null) or len(beReferenceAddress) <30 "
+        Dim DS As DataSet = (New AWS.DB.ConnectDB).SQLdataset(SQL)
+        For Each Row1 In DS.Tables(0).Rows
+            Dim ExodusID As Integer = Row1.Item("ExodusID")
+            Dim ReferenceAddress As String = GetReference(Row1.Item("beIn"))
+
+            SQL = "Update z_Exodus set beReferenceAddress='" + ReferenceAddress + "' where ExodusID=" & ExodusID
+            Call (New AWS.DB.ConnectDB).SQLExecute(Sql)
+        Next
+
+        If False Then
+            Dim PostURL As String = "C:\Users\Nivla\Downloads\1Exodus.txt"
+            Dim json As String = (New Bitcoin).getjson(PostURL)
+            Dim obj As New JObject
+            obj = JsonConvert.DeserializeObject(json)
+            Dim results As List(Of JToken) = obj.Children().ToList
+            Dim Ctr As Integer = 0
+            For Each item As JProperty In results
+                item.CreateReader()
+                Dim obj2 As New JObject
+                obj2 = JsonConvert.DeserializeObject(item.Value.ToString)
+                Dim hash As String = obj2.Item("hash")
+                Dim beIn As String = obj2.Item("in").ToString
+                Dim beOut As String = obj2.Item("out").ToString
+                Dim ReferenceAddress As String = GetReference(beIn)
+                SQL = "Update z_Exodus set beReferenceAddress='" + ReferenceAddress + "' where TxID='" & hash & "'"
+                Call (New AWS.DB.ConnectDB).SQLExecute(Sql)
+                showdata(hash + " " + ReferenceAddress)
+            Next
+
+        End If
+
+    End Sub
+
+
+    Function GetReference(ByVal beIn As String) As String
+        Dim ReferenceAddress As String = ""
+        Dim InArray As New JArray
+        InArray = JsonConvert.DeserializeObject(beIn)
+        Dim Prevouthash As String = ""
+        Dim n As Integer = 0
+        For Each subitem In InArray
+            If Not IsNothing(subitem("address")) Then
+                ReferenceAddress = subitem("address")
+            Else
+                Prevouthash = subitem("prev_out").Item("hash")
+                n = CInt(subitem("prev_out").Item("n"))
+            End If
+            Exit For
+        Next
+        If ReferenceAddress = "" Then
+            ReferenceAddress = GetReferenceFromPrevHash(Prevouthash, n)
+        End If
+        Return ReferenceAddress
+    End Function
+    Function GetReferenceFromPrevHash(ByVal PrevHash As String, ByVal n As Integer) As String
+        Dim Address As String = ""
+        Dim json As String = (New Bitcoin).getjson("http://blockexplorer.com/rawtx/" + PrevHash)
+        Dim objX = JsonConvert.DeserializeObject(json)
+        Dim OutArray As New JArray
+        OutArray = JsonConvert.DeserializeObject(objX.item("out").ToString)
+        Dim Ctr As Integer = 0
+        For Each subitem In OutArray
+            If n = Ctr Then
+                Dim Hash160 As String = GetStringBetween(subitem("scriptPubKey"), "OP_DUP OP_HASH160", "OP_EQUALVERIFY OP_CHECKSIG")
+                If Hash160.Length = 0 Then
+                    Dim InArray As New JArray
+                    InArray = JsonConvert.DeserializeObject(objX.item("in").ToString)
+                    For Each subitemIn In InArray
+                        Dim Prevouthash2 As String = subitemIn("prev_out").Item("hash")
+                        Dim n2 As Integer = CInt(subitemIn("prev_out").Item("n"))
+                        Address = GetReferenceFromPrevHash(Prevouthash2, n2)
+                        Exit For
+                    Next
+                Else
+                    Address = (New Bitcoin).Hash160toAddress(Trim(Hash160))
+                End If
+                Exit For
+            End If
+            Ctr = Ctr + 1
+        Next
+        Return Address
+    End Function
+    Public Function GetStringBetween(ByVal InputText As String, _
+                                     ByVal starttext As String, _
+                                     ByVal endtext As String) As String
+
+        Dim startPos As Integer
+        Dim endPos As Integer
+        Dim lenStart As Integer
+        Dim RetVal As String = ""
+        startPos = InputText.IndexOf(starttext, StringComparison.CurrentCultureIgnoreCase)
+        If startPos >= 0 Then
+            lenStart = startPos + starttext.Length
+            endPos = InputText.IndexOf(endtext, lenStart, StringComparison.CurrentCultureIgnoreCase)
+            If endPos >= 0 Then
+                RetVal = InputText.Substring(lenStart, endPos - lenStart)
+            End If
+        End If
+        Return RetVal
+    End Function
+
+End Class
