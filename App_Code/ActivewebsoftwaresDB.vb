@@ -10,7 +10,7 @@ Namespace AWS.DB
     Public Class ConnectDB
 
         Function ConnectDB2() As SqlConnection
-            Dim ConnectString As String = "Data Source=tcp:s09.winhost.com;Initial Catalog=DB_66808_mymsc;User ID=DB_66808_mymsc_user;Password=pass1088;Integrated Security=False;"
+            Dim ConnectString As String = ""
             Dim myConn As New SqlConnection(ConnectString)
             Return myConn
         End Function
